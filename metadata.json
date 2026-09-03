@@ -1,0 +1,6 @@
+{
+  "name": "SSEC IT Timetable Management System",
+  "description": "Smart Personalized Timetable Management System for SSEC IT Department featuring role-based dashboards for Students, Professors, and Admins with timetable CRUD, search filtering, notifications, and PDF export.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -1,0 +1,137 @@
+{% extends "base.html" %}
+
+{% block title %}Register Account - SSEC IT Timetable System{% endblock %}
+
+{% block content %}
+<div class="container">
+  <div class="row justify-content-center">
+    <div class="col-12 col-md-10 col-lg-6">
+      <div class="auth-card p-4 p-sm-5">
+        
+        <div class="text-center mb-4">
+          <div class="d-inline-flex p-3 rounded-4 bg-primary bg-opacity-10 text-primary mb-2">
+            <i class="bi bi-shield-lock-fill fs-2"></i>
+          </div>
+          <h3 class="fw-bold text-dark mb-1">Create Account</h3>
+          <p class="text-muted small">Registration with secure Email OTP verification</p>
+        </div>
+
+        <form method="POST" action="{{ url_for('auth.register') }}">
+          <!-- Role Selection -->
+          <div class="mb-3">
+            <label class="form-label small fw-semibold text-secondary">Select Role</label>
+            <div class="row g-2">
+              <div class="col-6">
+                <input type="radio" class="btn-check" name="role" id="reg_role_student" value="student" checked onchange="toggleRegFields('student')">
+                <label class="btn btn-outline-primary w-100 py-2 rounded-3 text-center" for="reg_role_student">
+                  <i class="bi bi-mortarboard d-block fs-5"></i>
+                  <span class="small fw-bold">Student</span>
+                </label>
+              </div>
+              <div class="col-6">
+                <input type="radio" class="btn-check" name="role" id="reg_role_professor" value="professor" onchange="toggleRegFields('professor')">
+                <label class="btn btn-outline-success w-100 py-2 rounded-3 text-center" for="reg_role_professor">
+                  <i class="bi bi-person-video3 d-block fs-5"></i>
+                  <span class="small fw-bold">Professor</span>
+                </label>
+              </div>
+            </div>
+          </div>
+
+          <!-- Full Name -->
+          <div class="mb-3">
+            <label class="form-label small fw-semibold text-secondary">Full Name</label>
+            <div class="input-group">
+              <span class="input-group-text bg-light"><i class="bi bi-person"></i></span>
+              <input type="text" name="full_name" required class="form-control" placeholder="e.g. Rahul Sharma" value="{{ full_name or '' }}">
+            </div>
+          </div>
+
+          <!-- Student Enrollment Number -->
+          <div class="mb-3" id="reg_student_id_group">
+            <label class="form-label small fw-semibold text-secondary">Enrollment Number</label>
+            <div class="input-group">
+              <span class="input-group-text bg-light"><i class="bi bi-card-text"></i></span>
+              <input type="text" name="enrollment_no" id="input_enrollment_no" class="form-control" placeholder="e.g. 200010116005">
+            </div>
+          </div>
+
+          <!-- Professor ID -->
+          <div class="mb-3 d-none" id="reg_prof_id_group">
+            <label class="form-label small fw-semibold text-secondary">Professor ID</label>
+            <div class="input-group">
+              <span class="input-group-text bg-light"><i class="bi bi-person-vcard"></i></span>
+              <input type="text" name="professor_id" id="input_professor_id" class="form-control" placeholder="e.g. PROF_IT_05">
+            </div>
+          </div>
+
+          <!-- Email Address -->
+          <div class="mb-3">
+            <label class="form-label small fw-semibold text-secondary">Email Address (OTP will be sent here)</label>
+            <div class="input-group">
+              <span class="input-group-text bg-light"><i class="bi bi-envelope"></i></span>
+              <input type="email" name="email" required class="form-control" placeholder="e.g. student@ssec.ac.in" value="{{ email or '' }}">
+            </div>
+            <div class="form-text text-muted small">We will send a 6-digit OTP code to verify your identity.</div>
+          </div>
+
+          <!-- Passwords -->
+          <div class="row g-2 mb-3">
+            <div class="col-12 col-sm-6">
+              <label class="form-label small fw-semibold text-secondary">Password</label>
+              <div class="input-group">
+                <span class="input-group-text bg-light"><i class="bi bi-lock"></i></span>
+                <input type="password" name="password" required class="form-control" placeholder="Min 4 chars">
+              </div>
+            </div>
+            <div class="col-12 col-sm-6">
+              <label class="form-label small fw-semibold text-secondary">Confirm Password</label>
+              <div class="input-group">
+                <span class="input-group-text bg-light"><i class="bi bi-shield-check"></i></span>
+                <input type="password" name="confirm_password" required class="form-control" placeholder="Re-type password">
+              </div>
+            </div>
+          </div>
+
+          <button type="submit" class="btn btn-ssec w-100 mt-3">
+            <i class="bi bi-send me-1"></i> Send Verification OTP & Continue
+          </button>
+        </form>
+
+        <div class="text-center mt-4 pt-3 border-top">
+          <span class="text-muted small">Already have an account?</span>
+          <a href="{{ url_for('auth.login') }}" class="small fw-bold text-primary text-decoration-none ms-1">
+            Sign In here
+          </a>
+        </div>
+
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  function toggleRegFields(role) {
+    const studentGroup = document.getElementById('reg_student_id_group');
+    const profGroup = document.getElementById('reg_prof_id_group');
+    const enrollInput = document.getElementById('input_enrollment_no');
+    const profInput = document.getElementById('input_professor_id');
+
+    if (role === 'student') {
+      studentGroup.classList.remove('d-none');
+      profGroup.classList.add('d-none');
+      enrollInput.setAttribute('required', 'required');
+      profInput.removeAttribute('required');
+    } else {
+      studentGroup.classList.add('d-none');
+      profGroup.classList.remove('d-none');
+      profInput.setAttribute('required', 'required');
+      enrollInput.removeAttribute('required');
+    }
+  }
+  // Initialize
+  toggleRegFields('student');
+</script>
+{% endblock %}
