@@ -51,7 +51,7 @@ export const AdminDashboardView: React.FC<AdminDashboardProps> = ({
   const itemsPerPage = 5;
 
   // Delete modal state
-  const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string; type: string } | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string; type: string; identifier?: string; role?: string } | null>(null);
 
   // Edit modals state
   const [editingSubject, setEditingSubject] = useState<Subject | null>(null);
@@ -83,6 +83,39 @@ export const AdminDashboardView: React.FC<AdminDashboardProps> = ({
 
   // SMTP Diagnostics state
   const [testingSmtp, setTestingSmtp] = useState(false);
+  const [testingMongo, setTestingMongo] = useState(false);
+  const [mongoStatus, setMongoStatus] = useState<{
+    connected?: boolean;
+    latencyMs?: number;
+    cluster?: string;
+    database?: string;
+    counts?: Record<string, number>;
+    message?: string;
+    error?: string;
+  } | null>(null);
+
+  const handleTestMongo = async (notify: boolean = false) => {
+    setTestingMongo(true);
+    try {
+      const res = await StorageService.testMongoLiveConnection();
+      setMongoStatus(res);
+      if (notify) {
+        if (res.connected) {
+          showFlash(`MongoDB Atlas Connected! Cluster: ${res.cluster || 'Cluster0'} (${res.latencyMs || 0}ms)`);
+        } else {
+          showFlash(`MongoDB Atlas: ${res.error || 'Failed to connect'}`, 'danger');
+        }
+      }
+    } catch (err: any) {
+      setMongoStatus({
+        connected: false,
+        error: err.message || 'Connection test failed'
+      });
+      if (notify) showFlash('Failed to check MongoDB connection', 'danger');
+    } finally {
+      setTestingMongo(false);
+    }
+  };
   const [smtpDiagnosticReport, setSmtpDiagnosticReport] = useState<{
     success: boolean;
     status: string;
@@ -223,6 +256,7 @@ export const AdminDashboardView: React.FC<AdminDashboardProps> = ({
   // Initial mount load
   useEffect(() => {
     fetchUsersAsync({ silent: true });
+    handleTestMongo(false);
   }, [fetchUsersAsync]);
 
   // Refresh helper for all data
@@ -267,7 +301,9 @@ export const AdminDashboardView: React.FC<AdminDashboardProps> = ({
     setDeleteTarget({
       id: u.id,
       name: `${u.full_name} (${u.identifier})`,
-      type: 'user'
+      type: 'user',
+      identifier: u.identifier,
+      role: u.role
     });
   };
 
@@ -668,12 +704,12 @@ export const AdminDashboardView: React.FC<AdminDashboardProps> = ({
   };
 
   // --- CONFIRM DELETE HANDLER ---
-  const confirmDelete = () => {
+  const confirmDelete = async () => {
     if (!deleteTarget) return;
-    const { id, type, name } = deleteTarget;
+    const { id, type, name, identifier, role } = deleteTarget;
     try {
       if (type === 'user') {
-        const deleted = StorageService.deleteRegisteredUser(id);
+        const deleted = await StorageService.deleteRegisteredUser(id, identifier, role);
         if (deleted) {
           addToast({
             type: 'success',
@@ -684,20 +720,20 @@ export const AdminDashboardView: React.FC<AdminDashboardProps> = ({
           addToast({
             type: 'danger',
             title: 'Delete Restricted',
-            message: `Failed to remove user "${name}". Super administrator accounts cannot be deleted.`
+            message: `Failed to remove user "${name}". Root super administrator account is protected by security policy.`
           });
         }
       } else if (type === 'student') {
-        StorageService.deleteStudent(id);
+        await StorageService.deleteStudent(id, identifier);
         addToast({ type: 'success', title: 'Student Deleted', message: `Student ${name} deleted successfully.` });
       } else if (type === 'professor') {
-        StorageService.deleteProfessor(id);
+        await StorageService.deleteProfessor(id, identifier);
         addToast({ type: 'success', title: 'Professor Deleted', message: `Faculty record ${name} deleted successfully.` });
       } else if (type === 'subject') {
-        StorageService.deleteSubject(id);
+        StorageService.deleteSubject(id, identifier);
         addToast({ type: 'success', title: 'Subject Deleted', message: `Subject ${name} deleted successfully.` });
       } else if (type === 'classroom') {
-        StorageService.deleteClassroom(id);
+        StorageService.deleteClassroom(id, identifier);
         addToast({ type: 'success', title: 'Classroom Deleted', message: `Classroom ${name} deleted successfully.` });
       } else if (type === 'timetable') {
         StorageService.deleteTimetable(id);
@@ -1015,23 +1051,67 @@ export const AdminDashboardView: React.FC<AdminDashboardProps> = ({
 
               {/* Database Connection Info */}
               <div className="bg-slate-50 border border-slate-200 rounded-xl p-5 space-y-3">
-                <h3 className="font-bold text-sm text-emerald-800 flex items-center gap-1.5">
-                  <Database className="w-4 h-4 text-emerald-600" />
-                  Database Connection
-                </h3>
+                <div className="flex items-center justify-between">
+                  <h3 className="font-bold text-sm text-emerald-800 flex items-center gap-1.5">
+                    <Database className="w-4 h-4 text-emerald-600" />
+                    MongoDB Atlas Database Connection
+                  </h3>
+                  {mongoStatus?.connected ? (
+                    <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">
+                      <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                      Atlas Connected ({mongoStatus.latencyMs || 0}ms)
+                    </span>
+                  ) : mongoStatus?.connected === false ? (
+                    <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-rose-100 text-rose-800 border border-rose-300">
+                      Offline
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-amber-100 text-amber-800 border border-amber-300">
+                      Checking...
+                    </span>
+                  )}
+                </div>
                 <p className="text-xs text-slate-600 font-medium leading-relaxed">
-                  Connected to MongoDB Atlas database <code className="bg-white border border-slate-200 px-2 py-0.5 rounded text-emerald-700 font-mono font-semibold">ssec_timetable_db</code>.
+                  Connected to MongoDB Atlas database <code className="bg-white border border-slate-200 px-2 py-0.5 rounded text-emerald-700 font-mono font-semibold">ssec_timetable</code> on cluster <code className="bg-white border border-slate-200 px-2 py-0.5 rounded text-slate-700 font-mono text-[11px]">cluster0.lhna7yh.mongodb.net</code>.
                 </p>
+                {mongoStatus?.counts && (
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1 text-[11px]">
+                    <div className="bg-white border border-slate-200 rounded-lg p-2 text-center">
+                      <span className="block text-slate-400 font-medium">Students</span>
+                      <span className="font-bold text-slate-800">{mongoStatus.counts.students ?? 0}</span>
+                    </div>
+                    <div className="bg-white border border-slate-200 rounded-lg p-2 text-center">
+                      <span className="block text-slate-400 font-medium">Professors</span>
+                      <span className="font-bold text-slate-800">{mongoStatus.counts.professors ?? 0}</span>
+                    </div>
+                    <div className="bg-white border border-slate-200 rounded-lg p-2 text-center">
+                      <span className="block text-slate-400 font-medium">Classrooms</span>
+                      <span className="font-bold text-slate-800">{mongoStatus.counts.classrooms ?? 0}</span>
+                    </div>
+                    <div className="bg-white border border-slate-200 rounded-lg p-2 text-center">
+                      <span className="block text-slate-400 font-medium">Timetables</span>
+                      <span className="font-bold text-slate-800">{mongoStatus.counts.timetables ?? 0}</span>
+                    </div>
+                  </div>
+                )}
                 <div className="flex flex-wrap gap-2 pt-1">
+                  <button
+                    onClick={() => handleTestMongo(true)}
+                    disabled={testingMongo}
+                    className="bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-xs px-3.5 py-2 rounded-xl font-semibold transition-all shadow-xs flex items-center gap-1.5"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${testingMongo ? 'animate-spin' : ''}`} />
+                    <span>{testingMongo ? 'Checking Connection...' : 'Test Atlas Connection'}</span>
+                  </button>
                   <button
                     onClick={() => {
                       StorageService.resetToSampleData();
                       refreshData();
                       showFlash('Database restored to SSEC IT sample data.');
                     }}
-                    className="bg-white hover:bg-slate-100 text-slate-800 border border-slate-300 text-xs px-4 py-2 rounded-xl font-semibold transition-all shadow-xs"
+                    className="bg-white hover:bg-slate-100 text-slate-800 border border-slate-300 text-xs px-3.5 py-2 rounded-xl font-semibold transition-all shadow-xs"
                   >
-                    Reset Database to SSEC IT Sample Data
+                    Reset Local Cache
                   </button>
                 </div>
               </div>
@@ -1152,7 +1232,7 @@ export const AdminDashboardView: React.FC<AdminDashboardProps> = ({
                         <td className="p-3">{st.classroom}</td>
                         <td className="p-3">
                           <button
-                            onClick={() => setDeleteTarget({ id: st.id, name: st.full_name, type: 'student' })}
+                            onClick={() => setDeleteTarget({ id: st.id, name: st.full_name, type: 'student', identifier: st.enrollment_no, role: 'student' })}
                             className="p-1.5 bg-red-50 text-red-600 hover:bg-red-100 rounded-lg border border-red-200"
                             title="Delete Student"
                           >
@@ -1231,7 +1311,7 @@ export const AdminDashboardView: React.FC<AdminDashboardProps> = ({
                       <td className="p-3">{pf.department}</td>
                       <td className="p-3">
                         <button
-                          onClick={() => setDeleteTarget({ id: pf.id, name: pf.full_name, type: 'professor' })}
+                          onClick={() => setDeleteTarget({ id: pf.id, name: pf.full_name, type: 'professor', identifier: pf.professor_id, role: 'professor' })}
                           className="p-1.5 bg-red-50 text-red-600 hover:bg-red-100 rounded-lg border border-red-200"
                         >
                           <Trash2 className="w-3.5 h-3.5" />

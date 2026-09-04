@@ -43,7 +43,7 @@ export const MongoConfigModal: React.FC<MongoConfigModalProps> = ({ isOpen, onCl
             </div>
             <div>
               <h3 className="font-bold text-lg text-slate-900">MongoDB Atlas Integration</h3>
-              <p className="text-xs font-semibold text-slate-500">Database: <span className="text-emerald-700 font-mono">ssec_timetable_db</span></p>
+              <p className="text-xs font-semibold text-slate-500">Database: <span className="text-emerald-700 font-mono">ssec_timetable</span></p>
             </div>
           </div>
           <button onClick={onClose} className="p-2 rounded-full text-slate-400 hover:text-slate-700 hover:bg-slate-200/60 transition-all">

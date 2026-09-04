@@ -6,9 +6,9 @@ from pymongo.server_api import ServerApi
 # MongoDB Atlas Primary Connection String
 MONGO_URI = os.getenv(
     'MONGO_URI',
-    'mongodb+srv://admin:SSECIT2026@cluster0.yh7oncz.mongodb.net/?appName=Cluster0'
+    'mongodb+srv://admin:SSECIT2026@cluster0.lhna7yh.mongodb.net/ssec_timetable?retryWrites=true&w=majority&appName=Cluster0'
 )
-MONGO_DBNAME = os.getenv('MONGO_DB_NAME', 'ssec_timetable_db')
+MONGO_DBNAME = os.getenv('MONGO_DB_NAME', 'ssec_timetable')
 
 mongo = PyMongo()
 _client = None

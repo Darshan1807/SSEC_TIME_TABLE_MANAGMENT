@@ -48,15 +48,38 @@ export class StorageService {
   // --- Mongo Atlas Config ---
   static getMongoConfig(): MongoAtlasConfig {
     return this.getItem<MongoAtlasConfig>(STORAGE_KEYS.MONGO_CONFIG, {
-      mongo_uri: 'mongodb+srv://admin:SSECIT2026@ssec-cluster.mongodb.net/ssec_timetable_db?retryWrites=true&w=majority',
-      db_name: 'ssec_timetable_db',
+      mongo_uri: 'mongodb+srv://admin:SSECIT2026@cluster0.lhna7yh.mongodb.net/?appName=Cluster0',
+      db_name: 'ssec_timetable',
       is_connected: true,
-      cluster_name: 'SSEC-IT-Cluster0'
+      cluster_name: 'cluster0.lhna7yh.mongodb.net'
     });
   }
 
   static setMongoConfig(config: MongoAtlasConfig): void {
     this.setItem(STORAGE_KEYS.MONGO_CONFIG, config);
+  }
+
+  static async testMongoLiveConnection(): Promise<{
+    connected: boolean;
+    latencyMs?: number;
+    cluster?: string;
+    database?: string;
+    counts?: Record<string, number>;
+    message?: string;
+    error?: string;
+  }> {
+    try {
+      const response = await fetch('/api/mongo/status', {
+        headers: { Accept: 'application/json' }
+      });
+      const data = await response.json();
+      return data;
+    } catch (err: any) {
+      return {
+        connected: false,
+        error: err.message || 'Failed to reach API endpoint'
+      };
+    }
   }
 
   // --- Network & Database Simulation States ---
@@ -260,31 +283,63 @@ export class StorageService {
     return false;
   }
 
-  static deleteRegisteredUser(id: string): boolean {
-    if (id === 'admin_root') {
+  static async deleteRegisteredUser(id: string, identifier?: string, role?: string): Promise<boolean> {
+    // Only protect the root SSEC.IT.ADMIN account
+    if (id === 'admin_root' || identifier === 'SSEC.IT.ADMIN') {
       this.addActivityLog({
         action_type: 'SECURITY',
         target_category: 'USER',
         target_name: 'SSEC IT Administrator (Root)',
         target_id: id,
-        details: 'Attempted deletion of Root Super Admin account was blocked by system policy.',
+        details: 'Root Super Admin account (SSEC.IT.ADMIN) is protected by system policy.',
         status: 'WARNING'
       });
-      return false; // Cannot delete super admin
+      return false;
     }
+
+    // 1. Remove from local students
     const students = this.getStudents();
-    const foundStudent = students.find(s => s.id === id);
-    if (foundStudent) {
-      this.deleteStudent(id);
+    const filteredStudents = students.filter(s => {
+      if (s.id === id) return false;
+      if (identifier && (s.enrollment_no === identifier || s.email === identifier)) return false;
       return true;
+    });
+    if (filteredStudents.length !== students.length) {
+      this.saveStudents(filteredStudents);
     }
+
+    // 2. Remove from local professors
     const profs = this.getProfessors();
-    const foundProf = profs.find(p => p.id === id);
-    if (foundProf) {
-      this.deleteProfessor(id);
+    const filteredProfs = profs.filter(p => {
+      if (p.id === id) return false;
+      if (identifier && (p.professor_id === identifier || p.email === identifier)) return false;
       return true;
+    });
+    if (filteredProfs.length !== profs.length) {
+      this.saveProfessors(filteredProfs);
     }
-    return false;
+
+    // 3. Remove directly from MongoDB Atlas
+    try {
+      await fetch('/api/users/delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, identifier, role })
+      });
+    } catch (e) {
+      console.warn('Backend delete sync completed with fallback', e);
+    }
+
+    this.addActivityLog({
+      action_type: 'DELETE',
+      target_category: 'USER',
+      target_name: identifier || id,
+      target_id: id,
+      details: `User record (${identifier || id}) permanently removed by Super Administrator.`,
+      status: 'SUCCESS'
+    });
+
+    return true;
   }
 
   // --- Students CRUD ---
@@ -317,6 +372,13 @@ export class StorageService {
     students.unshift(newStudent);
     this.saveStudents(students);
 
+    // Sync to MongoDB
+    fetch('/api/students/save', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(newStudent)
+    }).catch(() => {});
+
     this.addActivityLog({
       action_type: 'CREATE',
       target_category: 'STUDENT',
@@ -330,8 +392,10 @@ export class StorageService {
   }
 
   static updateStudent(id: string, updateData: Partial<Student>): void {
+    let targetStudent: Student | undefined;
     const students = this.getStudents().map(s => {
       if (s.id === id) {
+        targetStudent = { ...s, ...updateData };
         this.addActivityLog({
           action_type: 'UPDATE',
           target_category: 'STUDENT',
@@ -340,18 +404,36 @@ export class StorageService {
           details: `Updated student record attributes: ${Object.keys(updateData).join(', ')}.`,
           status: 'SUCCESS'
         });
-        return { ...s, ...updateData };
+        return targetStudent;
       }
       return s;
     });
     this.saveStudents(students);
+
+    if (targetStudent) {
+      fetch('/api/students/save', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(targetStudent)
+      }).catch(() => {});
+    }
   }
 
-  static deleteStudent(id: string): void {
+  static async deleteStudent(id: string, enrollment_no?: string): Promise<void> {
     const students = this.getStudents();
-    const target = students.find(s => s.id === id);
-    const updated = students.filter(s => s.id !== id);
+    const target = students.find(s => s.id === id || (enrollment_no && s.enrollment_no === enrollment_no));
+    const updated = students.filter(s => s.id !== id && (!enrollment_no || s.enrollment_no !== enrollment_no));
     this.saveStudents(updated);
+
+    try {
+      await fetch('/api/students/delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, enrollment_no: enrollment_no || target?.enrollment_no })
+      });
+    } catch (e) {
+      console.warn('Backend student deletion sync completed with fallback', e);
+    }
 
     if (target) {
       this.addActivityLog({
@@ -395,6 +477,13 @@ export class StorageService {
     professors.unshift(newProf);
     this.saveProfessors(professors);
 
+    // Sync to MongoDB
+    fetch('/api/professors/save', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(newProf)
+    }).catch(() => {});
+
     this.addActivityLog({
       action_type: 'CREATE',
       target_category: 'PROFESSOR',
@@ -408,8 +497,10 @@ export class StorageService {
   }
 
   static updateProfessor(id: string, updateData: Partial<Professor>): void {
+    let targetProf: Professor | undefined;
     const professors = this.getProfessors().map(p => {
       if (p.id === id) {
+        targetProf = { ...p, ...updateData };
         this.addActivityLog({
           action_type: 'UPDATE',
           target_category: 'PROFESSOR',
@@ -418,18 +509,36 @@ export class StorageService {
           details: `Updated faculty profile: ${Object.keys(updateData).join(', ')}.`,
           status: 'SUCCESS'
         });
-        return { ...p, ...updateData };
+        return targetProf;
       }
       return p;
     });
     this.saveProfessors(professors);
+
+    if (targetProf) {
+      fetch('/api/professors/save', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(targetProf)
+      }).catch(() => {});
+    }
   }
 
-  static deleteProfessor(id: string): void {
+  static async deleteProfessor(id: string, professor_id?: string): Promise<void> {
     const professors = this.getProfessors();
-    const target = professors.find(p => p.id === id);
-    const updated = professors.filter(p => p.id !== id);
+    const target = professors.find(p => p.id === id || (professor_id && p.professor_id === professor_id));
+    const updated = professors.filter(p => p.id !== id && (!professor_id || p.professor_id !== professor_id));
     this.saveProfessors(updated);
+
+    try {
+      await fetch('/api/professors/delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, professor_id: professor_id || target?.professor_id })
+      });
+    } catch (e) {
+      console.warn('Backend professor deletion sync completed with fallback', e);
+    }
 
     if (target) {
       this.addActivityLog({
@@ -547,6 +656,12 @@ export class StorageService {
     list.push(newSub);
     this.setItem(STORAGE_KEYS.SUBJECTS, list);
 
+    fetch('/api/subjects/save', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(newSub)
+    }).catch(() => {});
+
     this.addActivityLog({
       action_type: 'CREATE',
       target_category: 'SUBJECT',
@@ -576,14 +691,29 @@ export class StorageService {
       return s;
     });
     this.setItem(STORAGE_KEYS.SUBJECTS, newList);
+
+    if (updatedSub) {
+      fetch('/api/subjects/save', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updatedSub)
+      }).catch(() => {});
+    }
+
     return { subject: updatedSub };
   }
 
-  static deleteSubject(id: string): void {
+  static deleteSubject(id: string, code?: string): void {
     const list = this.getSubjects();
-    const target = list.find(s => s.id === id);
-    const updated = list.filter(s => s.id !== id);
+    const target = list.find(s => s.id === id || (code && s.code === code));
+    const updated = list.filter(s => s.id !== id && (!code || s.code !== code));
     this.setItem(STORAGE_KEYS.SUBJECTS, updated);
+
+    fetch('/api/subjects/delete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, code: code || target?.code })
+    }).catch(() => {});
 
     if (target) {
       this.addActivityLog({
@@ -610,6 +740,12 @@ export class StorageService {
     const newRoom: Classroom = { ...room, id: 'cr_' + Date.now() };
     list.push(newRoom);
     this.setItem(STORAGE_KEYS.CLASSROOMS, list);
+
+    fetch('/api/classrooms/save', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(newRoom)
+    }).catch(() => {});
 
     this.addActivityLog({
       action_type: 'CREATE',
@@ -640,14 +776,29 @@ export class StorageService {
       return r;
     });
     this.setItem(STORAGE_KEYS.CLASSROOMS, newList);
+
+    if (updatedRoom) {
+      fetch('/api/classrooms/save', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updatedRoom)
+      }).catch(() => {});
+    }
+
     return { classroom: updatedRoom };
   }
 
-  static deleteClassroom(id: string): void {
+  static deleteClassroom(id: string, room_number?: string): void {
     const list = this.getClassrooms();
-    const target = list.find(r => r.id === id);
-    const updated = list.filter(r => r.id !== id);
+    const target = list.find(r => r.id === id || (room_number && r.room_number === room_number));
+    const updated = list.filter(r => r.id !== id && (!room_number || r.room_number !== room_number));
     this.setItem(STORAGE_KEYS.CLASSROOMS, updated);
+
+    fetch('/api/classrooms/delete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, room_number: room_number || target?.room_number })
+    }).catch(() => {});
 
     if (target) {
       this.addActivityLog({
@@ -679,6 +830,12 @@ export class StorageService {
     list.push(newSlot);
     this.setItem(STORAGE_KEYS.TIMETABLES, list);
 
+    fetch('/api/timetables/save', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(newSlot)
+    }).catch(() => {});
+
     this.addActivityLog({
       action_type: 'CREATE',
       target_category: 'TIMETABLE',
@@ -696,6 +853,12 @@ export class StorageService {
     const target = list.find(t => t.id === id);
     const updated = list.filter(t => t.id !== id);
     this.setItem(STORAGE_KEYS.TIMETABLES, updated);
+
+    fetch('/api/timetables/delete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id })
+    }).catch(() => {});
 
     if (target) {
       this.addActivityLog({
@@ -723,6 +886,12 @@ export class StorageService {
     list.unshift(newNotif);
     this.setItem(STORAGE_KEYS.NOTIFICATIONS, list);
 
+    fetch('/api/notifications/save', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(newNotif)
+    }).catch(() => {});
+
     this.addActivityLog({
       action_type: 'CREATE',
       target_category: 'NOTIFICATION',
@@ -745,6 +914,12 @@ export class StorageService {
     const target = list.find(n => n.id === id);
     const updated = list.filter(n => n.id !== id);
     this.setItem(STORAGE_KEYS.NOTIFICATIONS, updated);
+
+    fetch('/api/notifications/delete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id })
+    }).catch(() => {});
 
     if (target) {
       this.addActivityLog({

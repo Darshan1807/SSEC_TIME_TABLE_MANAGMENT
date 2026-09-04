@@ -4,10 +4,31 @@ import crypto from 'crypto';
 import net from 'net';
 import fs from 'fs';
 import nodemailer from 'nodemailer';
+import { MongoClient, ObjectId } from 'mongodb';
 import { createServer as createViteServer } from 'vite';
 
 const app = express();
 const PORT = 3000;
+
+// --- MongoDB Atlas Database Setup ---
+const MONGO_URI = process.env.MONGO_URI || 'mongodb+srv://admin:SSECIT2026@cluster0.lhna7yh.mongodb.net/?appName=Cluster0';
+const MONGO_DB_NAME = (process.env.MONGO_DB_NAME && process.env.MONGO_DB_NAME !== 'ssec_timetable_db') 
+  ? process.env.MONGO_DB_NAME 
+  : 'ssec_timetable';
+
+let mongoClientInstance: MongoClient | null = null;
+
+async function getMongoDatabase() {
+  if (!mongoClientInstance) {
+    mongoClientInstance = new MongoClient(MONGO_URI, {
+      serverSelectionTimeoutMS: 6000,
+      connectTimeoutMS: 10000,
+    });
+    await mongoClientInstance.connect();
+    console.log(`[MongoDB Atlas] Connected successfully to cluster at ${MONGO_URI.split('@')[1] || 'cluster0'}, DB: ${MONGO_DB_NAME}`);
+  }
+  return mongoClientInstance.db(MONGO_DB_NAME);
+}
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -413,6 +434,352 @@ async function runSmtpDiagnostics() {
 // Health check
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', time: new Date().toISOString() });
+});
+
+// MongoDB Atlas Status Diagnostic Endpoint
+app.get('/api/mongo/status', async (req, res) => {
+  const startTime = Date.now();
+  try {
+    const db = await getMongoDatabase();
+    await db.command({ ping: 1 });
+    const latencyMs = Date.now() - startTime;
+    
+    const collectionsList = await db.listCollections().toArray();
+    const counts: Record<string, number> = {};
+    for (const col of collectionsList) {
+      counts[col.name] = await db.collection(col.name).countDocuments();
+    }
+
+    return res.json({
+      success: true,
+      connected: true,
+      message: 'MongoDB Atlas connected successfully.',
+      uri: MONGO_URI.replace(/\/\/([^:]+):([^@]+)@/, '//$1:****@'),
+      cluster: 'cluster0.lhna7yh.mongodb.net',
+      database: MONGO_DB_NAME,
+      collections: collectionsList.map(c => c.name),
+      counts,
+      latencyMs,
+      timestamp: new Date().toISOString()
+    });
+  } catch (err: any) {
+    mongoClientInstance = null;
+    const latencyMs = Date.now() - startTime;
+    return res.status(500).json({
+      success: false,
+      connected: false,
+      message: 'Failed to connect to MongoDB Atlas.',
+      error: err.message,
+      uri: MONGO_URI.replace(/\/\/([^:]+):([^@]+)@/, '//$1:****@'),
+      database: MONGO_DB_NAME,
+      latencyMs,
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
+// Users endpoint fetching directly from MongoDB Atlas
+app.get('/api/users', async (req, res) => {
+  try {
+    const db = await getMongoDatabase();
+    const students = await db.collection('students').find().toArray();
+    const professors = await db.collection('professors').find().toArray();
+    
+    const formattedUsers: any[] = [];
+    
+    for (const s of students) {
+      formattedUsers.push({
+        id: s.id || (s._id ? String(s._id) : Math.random().toString(36).substring(2, 9)),
+        full_name: s.full_name,
+        email: s.email,
+        role: 'student',
+        identifier: s.enrollment_no,
+        semester: s.semester,
+        classroom: s.classroom,
+        phone: s.phone,
+        status: s.status || 'Active',
+        registered_at: s.registered_at || new Date().toISOString()
+      });
+    }
+
+    for (const p of professors) {
+      formattedUsers.push({
+        id: p.id || (p._id ? String(p._id) : Math.random().toString(36).substring(2, 9)),
+        full_name: p.full_name,
+        email: p.email,
+        role: 'professor',
+        identifier: p.professor_id,
+        department: p.department || 'Information Technology',
+        designation: p.designation || 'Assistant Professor',
+        phone: p.phone,
+        status: p.status || 'Active',
+        registered_at: p.registered_at || new Date().toISOString()
+      });
+    }
+
+    return res.json({
+      success: true,
+      users: formattedUsers,
+      total: formattedUsers.length,
+      source: 'MongoDB Atlas'
+    });
+  } catch (err: any) {
+    return res.status(500).json({
+      success: false,
+      error: err.message
+    });
+  }
+});
+
+// Full sync data from MongoDB
+app.get('/api/mongo/data', async (req, res) => {
+  try {
+    const db = await getMongoDatabase();
+    const students = await db.collection('students').find().toArray();
+    const professors = await db.collection('professors').find().toArray();
+    const classrooms = await db.collection('classrooms').find().toArray();
+    const subjects = await db.collection('subjects').find().toArray();
+    const timetables = await db.collection('timetables').find().toArray();
+    const notifications = await db.collection('notifications').find().toArray();
+
+    return res.json({
+      success: true,
+      data: {
+        students,
+        professors,
+        classrooms,
+        subjects,
+        timetables,
+        notifications
+      }
+    });
+  } catch (err: any) {
+    return res.status(500).json({
+      success: false,
+      error: err.message
+    });
+  }
+});
+
+// Helper to construct flexible MongoDB ID/Field queries
+function buildMongoMatchQuery(id?: string, extraFields: Record<string, any> = {}) {
+  const orList: any[] = [];
+  if (id) {
+    orList.push({ id });
+    if (typeof id === 'string' && /^[0-9a-fA-F]{24}$/.test(id)) {
+      try {
+        orList.push({ _id: new ObjectId(id) });
+      } catch {}
+    }
+  }
+  for (const [key, val] of Object.entries(extraFields)) {
+    if (val !== undefined && val !== null && val !== '') {
+      orList.push({ [key]: val });
+    }
+  }
+  return orList.length > 0 ? { $or: orList } : {};
+}
+
+// Universal User Delete (Superuser CRUD Operation)
+app.post('/api/users/delete', async (req, res) => {
+  try {
+    const { id, identifier, role } = req.body;
+    if (!id && !identifier) {
+      return res.status(400).json({ success: false, error: 'User ID or identifier required for deletion' });
+    }
+
+    const db = await getMongoDatabase();
+    let totalDeleted = 0;
+
+    // Build conditions
+    const query = buildMongoMatchQuery(id, {
+      professor_id: identifier,
+      enrollment_no: identifier,
+      email: identifier
+    });
+
+    if (role === 'professor' || !role) {
+      const pRes = await db.collection('professors').deleteMany(query);
+      totalDeleted += pRes.deletedCount;
+    }
+    if (role === 'student' || !role) {
+      const sRes = await db.collection('students').deleteMany(query);
+      totalDeleted += sRes.deletedCount;
+    }
+    if (role === 'admin') {
+      // Only protect root SSEC.IT.ADMIN
+      if (identifier !== 'SSEC.IT.ADMIN') {
+        const aRes = await db.collection('admins').deleteMany(query);
+        totalDeleted += aRes.deletedCount;
+      }
+    }
+
+    return res.json({
+      success: true,
+      deletedCount: totalDeleted,
+      message: `User record removed from MongoDB Atlas (${totalDeleted} document(s) deleted).`
+    });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Professor CRUD
+app.post('/api/professors/delete', async (req, res) => {
+  try {
+    const { id, professor_id } = req.body;
+    const db = await getMongoDatabase();
+    const query = buildMongoMatchQuery(id, { professor_id });
+    const result = await db.collection('professors').deleteMany(query);
+    return res.json({ success: true, deletedCount: result.deletedCount });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/professors/save', async (req, res) => {
+  try {
+    const prof = req.body;
+    const db = await getMongoDatabase();
+    if (prof.id || prof._id) {
+      const query = buildMongoMatchQuery(prof.id, { professor_id: prof.professor_id });
+      await db.collection('professors').updateOne(query, { $set: prof }, { upsert: true });
+    } else {
+      await db.collection('professors').insertOne(prof);
+    }
+    return res.json({ success: true });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Student CRUD
+app.post('/api/students/delete', async (req, res) => {
+  try {
+    const { id, enrollment_no } = req.body;
+    const db = await getMongoDatabase();
+    const query = buildMongoMatchQuery(id, { enrollment_no });
+    const result = await db.collection('students').deleteMany(query);
+    return res.json({ success: true, deletedCount: result.deletedCount });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/students/save', async (req, res) => {
+  try {
+    const student = req.body;
+    const db = await getMongoDatabase();
+    if (student.id || student._id) {
+      const query = buildMongoMatchQuery(student.id, { enrollment_no: student.enrollment_no });
+      await db.collection('students').updateOne(query, { $set: student }, { upsert: true });
+    } else {
+      await db.collection('students').insertOne(student);
+    }
+    return res.json({ success: true });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Subject CRUD
+app.post('/api/subjects/delete', async (req, res) => {
+  try {
+    const { id, code } = req.body;
+    const db = await getMongoDatabase();
+    const query = buildMongoMatchQuery(id, { code });
+    const result = await db.collection('subjects').deleteMany(query);
+    return res.json({ success: true, deletedCount: result.deletedCount });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/subjects/save', async (req, res) => {
+  try {
+    const subject = req.body;
+    const db = await getMongoDatabase();
+    const query = buildMongoMatchQuery(subject.id, { code: subject.code });
+    await db.collection('subjects').updateOne(query, { $set: subject }, { upsert: true });
+    return res.json({ success: true });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Classroom CRUD
+app.post('/api/classrooms/delete', async (req, res) => {
+  try {
+    const { id, room_number } = req.body;
+    const db = await getMongoDatabase();
+    const query = buildMongoMatchQuery(id, { room_number });
+    const result = await db.collection('classrooms').deleteMany(query);
+    return res.json({ success: true, deletedCount: result.deletedCount });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/classrooms/save', async (req, res) => {
+  try {
+    const classroom = req.body;
+    const db = await getMongoDatabase();
+    const query = buildMongoMatchQuery(classroom.id, { room_number: classroom.room_number });
+    await db.collection('classrooms').updateOne(query, { $set: classroom }, { upsert: true });
+    return res.json({ success: true });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Timetable CRUD
+app.post('/api/timetables/delete', async (req, res) => {
+  try {
+    const { id } = req.body;
+    const db = await getMongoDatabase();
+    const query = buildMongoMatchQuery(id);
+    const result = await db.collection('timetables').deleteMany(query);
+    return res.json({ success: true, deletedCount: result.deletedCount });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/timetables/save', async (req, res) => {
+  try {
+    const slot = req.body;
+    const db = await getMongoDatabase();
+    const query = buildMongoMatchQuery(slot.id);
+    await db.collection('timetables').updateOne(query, { $set: slot }, { upsert: true });
+    return res.json({ success: true });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Notification CRUD
+app.post('/api/notifications/delete', async (req, res) => {
+  try {
+    const { id } = req.body;
+    const db = await getMongoDatabase();
+    const query = buildMongoMatchQuery(id);
+    const result = await db.collection('notifications').deleteMany(query);
+    return res.json({ success: true, deletedCount: result.deletedCount });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/notifications/save', async (req, res) => {
+  try {
+    const notif = req.body;
+    const db = await getMongoDatabase();
+    const query = buildMongoMatchQuery(notif.id);
+    await db.collection('notifications').updateOne(query, { $set: notif }, { upsert: true });
+    return res.json({ success: true });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
 });
 
 // Diagnostic Endpoint (GET & POST supported for both /api/smtp/diagnostics and /api/otp/diagnostics)
