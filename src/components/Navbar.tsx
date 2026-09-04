@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { AuthUser, NotificationItem } from '../types';
-import { Bell, LogOut, Code, Database, Search, Calendar, ShieldCheck, Mail } from 'lucide-react';
+import { Bell, LogOut, Search, Calendar, ShieldCheck, Mail } from 'lucide-react';
 
 interface NavbarProps {
   user: AuthUser | null;
@@ -8,8 +8,8 @@ interface NavbarProps {
   activeApp?: 'portal' | 'admin';
   onSwitchApp?: (app: 'portal' | 'admin') => void;
   onLogout: () => void;
-  onOpenCodeViewer: () => void;
-  onOpenMongoConfig: () => void;
+  onOpenCodeViewer?: () => void;
+  onOpenMongoConfig?: () => void;
   onOpenSearch: () => void;
   onOpenProfile: () => void;
 }
@@ -65,45 +65,33 @@ export const Navbar: React.FC<NavbarProps> = ({
 
           {/* Right Controls */}
           <div className="flex items-center space-x-2 sm:space-x-3">
-            {/* Dedicated Administrator Button to move to Admin Panel (ONLY on Professor Dashboard) */}
-            {onSwitchApp && activeApp === 'portal' && user?.role === 'professor' && (
+            {/* Administrator Button (ONLY on Login & Register page) */}
+            {onSwitchApp && activeApp === 'portal' && !user && (
               <button
                 type="button"
                 id="btn-nav-admin"
                 onClick={() => onSwitchApp('admin')}
                 className="flex items-center space-x-1.5 bg-slate-900 hover:bg-slate-800 active:scale-95 text-white px-3 sm:px-4 py-1.5 sm:py-2 rounded-xl text-xs font-semibold transition-all shadow-xs cursor-pointer"
-                title="Move to Administrator Panel"
+                title="Administrator Portal"
               >
-                <ShieldCheck className="w-3.5 h-3.5 text-sky-400" />
-                <span className="hidden sm:inline">Administrator</span>
-                <span className="sm:hidden">Admin</span>
+                <ShieldCheck className="w-4 h-4 text-sky-400" />
+                <span>Administrator</span>
               </button>
             )}
 
-            {/* MongoDB Atlas & Flask Code Buttons (ONLY VISIBLE TO ADMIN USERS) */}
-            {user?.role === 'admin' && (
-              <>
-                <button
-                  id="navbar-mongo-btn"
-                  onClick={onOpenMongoConfig}
-                  title="MongoDB Atlas Database Settings"
-                  className="flex items-center space-x-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 px-3 py-1.5 rounded-full border border-emerald-200 text-xs font-medium transition-all shadow-xs"
-                >
-                  <Database className="w-3.5 h-3.5 text-emerald-600" />
-                  <span className="hidden sm:inline">Atlas DB</span>
-                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-                </button>
-
-                <button
-                  id="navbar-code-btn"
-                  onClick={onOpenCodeViewer}
-                  title="View Python Flask Backend Source Code"
-                  className="flex items-center space-x-2 bg-sky-50 hover:bg-sky-100 text-sky-700 px-3 py-1.5 rounded-full border border-sky-200 text-xs font-medium transition-all shadow-xs"
-                >
-                  <Code className="w-3.5 h-3.5 text-sky-600" />
-                  <span className="hidden sm:inline">Flask Code</span>
-                </button>
-              </>
+            {/* Quick Return to Admin Panel (ONLY for Admin users viewing Portal) */}
+            {onSwitchApp && activeApp === 'portal' && user?.role === 'admin' && (
+              <button
+                type="button"
+                id="btn-nav-admin-return"
+                onClick={() => onSwitchApp('admin')}
+                className="flex items-center space-x-1.5 bg-slate-900 hover:bg-slate-800 active:scale-95 text-white px-3 sm:px-4 py-1.5 sm:py-2 rounded-xl text-xs font-semibold transition-all shadow-xs cursor-pointer"
+                title="Return to Administrator Control Panel"
+              >
+                <ShieldCheck className="w-3.5 h-3.5 text-sky-400" />
+                <span className="hidden sm:inline">Admin Panel</span>
+                <span className="sm:hidden">Admin</span>
+              </button>
             )}
 
             {user && (

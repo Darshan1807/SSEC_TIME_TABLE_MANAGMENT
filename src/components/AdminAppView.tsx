@@ -142,26 +142,6 @@ export const AdminAppView: React.FC<AdminAppViewProps> = ({
                     <span className="hidden md:inline">Live Portal Preview</span>
                   </button>
 
-                  {/* MongoDB Atlas Button */}
-                  <button
-                    onClick={onOpenMongoConfig}
-                    className="flex items-center space-x-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all shadow-xs"
-                    title="Configure MongoDB Atlas"
-                  >
-                    <Database className="w-3.5 h-3.5 text-emerald-600" />
-                    <span className="hidden md:inline">Atlas DB</span>
-                  </button>
-
-                  {/* Flask Code Viewer */}
-                  <button
-                    onClick={onOpenCodeViewer}
-                    className="flex items-center space-x-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all shadow-xs"
-                    title="View Python Flask Backend"
-                  >
-                    <Code className="w-3.5 h-3.5 text-indigo-600" />
-                    <span className="hidden md:inline">Flask Code</span>
-                  </button>
-
                   {/* Search */}
                   <button
                     onClick={onOpenSearch}
@@ -336,17 +316,11 @@ export const AdminAppView: React.FC<AdminAppViewProps> = ({
             <span className="text-slate-500">Admin Control Center</span>
           </div>
           <div className="flex items-center space-x-4 text-slate-500">
-            <button onClick={onSwitchToPortal} className="hover:text-sky-600 transition-colors">
-              Timetable Portal
+            <button onClick={onSwitchToPortal} className="hover:text-sky-600 transition-colors font-medium">
+              Return to Timetable Portal
             </button>
             <span>•</span>
-            <button onClick={onOpenMongoConfig} className="hover:text-emerald-600 transition-colors">
-              Atlas DB
-            </button>
-            <span>•</span>
-            <button onClick={onOpenCodeViewer} className="hover:text-indigo-600 transition-colors">
-              Flask Engine
-            </button>
+            <span>Academic Scheduler Control Suite</span>
           </div>
         </div>
       </footer>

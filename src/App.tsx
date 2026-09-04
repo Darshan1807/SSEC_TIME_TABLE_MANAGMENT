@@ -147,7 +147,6 @@ export default function App() {
             onOpenSearch={() => setIsSearchOpen(true)}
             onOpenProfile={() => setIsProfileOpen(true)}
             onLogout={handleLogout}
-            onSwitchToAdminApp={() => handleSwitchApp('admin')}
           />
         ) : (
           <div className="p-4 sm:p-6 max-w-7xl mx-auto space-y-6">
